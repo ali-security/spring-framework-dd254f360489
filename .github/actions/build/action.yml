@@ -20,6 +20,10 @@ inputs:
   develocity-access-key:
     required: false
     description: 'The access key for authentication with ge.spring.io'
+  tasks:
+    required: false
+    default: 'check'
+    description: 'The Gradle tasks to run when not publishing'
 outputs:
   build-scan-url:
     description: 'The URL, if any, of the build scan produced by the build'
@@ -41,7 +45,7 @@ runs:
       id: build
       if: ${{ inputs.publish == 'false' }}
       shell: bash
-      run: ./gradlew check
+      run: ./gradlew ${{ inputs.tasks }}
     - name: Publish
       id: publish
       if: ${{ inputs.publish == 'true' }}
