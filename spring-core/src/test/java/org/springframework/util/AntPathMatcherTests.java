@@ -16,17 +16,22 @@
 
 package org.springframework.util;
 
+import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException;
+import static org.assertj.core.api.Assertions.assertThatIllegalStateException;
 
 /**
  * Unit tests for {@link AntPathMatcher}.
@@ -703,6 +708,75 @@ class AntPathMatcherTests {
 	@Test // gh-23297
 	void isPatternWithNullPath() {
 		assertThat(pathMatcher.isPattern(null)).isFalse();
+	}
+
+	@Test  // CVE-2026-41848
+	void patternWithEmbeddedRegexDoesNotAllowCatastrophicBacktracking() {
+		// A URI template variable lets an attacker-supplied pattern inject an arbitrary
+		// regular expression. The trailing 'b' is missing from the path, so the engine
+		// has to exhaust every partition of the input before giving up.
+		String path = "/" + repeat('a', 2_000);
+
+		// "(a+)+b" is the textbook exponential backtracking case. Java 9+ remembers failed
+		// positions of such group loops (which only makes it quadratic), hence the long path.
+		assertMatchingIsAborted("/{var:(a+)+b}", path);
+		// A chain of greedy quantifiers backtracks super-polynomially on every JDK.
+		assertMatchingIsAborted("/{var:a*a*a*a*a*a*a*a*a*a*a*b}", path);
+	}
+
+	@Test  // CVE-2026-41848
+	void wildcardOnlyPatternDoesNotAllowCatastrophicBacktracking() {
+		// No embedded regex at all: a chain of '*' wildcards compiles to ".*a.*a...b",
+		// which backtracks super-polynomially against an input that never matches.
+		String pattern = "/*a*a*a*a*a*a*a*a*a*a*a*b";
+		String path = "/" + repeat('a', 100);
+
+		assertMatchingIsAborted(pattern, path);
+	}
+
+	@Test  // CVE-2026-41848
+	void guardDoesNotAffectLegitimateMatching() {
+		// The attempt counter is per match invocation, so ordinary (linear) matching of
+		// long segments, repeated many times, must keep working.
+		String path = "/" + repeat('a', 100_000) + "/suffix";
+		for (int i = 0; i < 5; i++) {
+			assertThat(pathMatcher.match("/*/suffix", path)).isTrue();
+			assertThat(pathMatcher.match("/{var}/suffix", path)).isTrue();
+			assertThat(pathMatcher.extractUriTemplateVariables("/{var}/suffix", path))
+					.containsEntry("var", repeat('a', 100_000));
+			assertThat(pathMatcher.match("/*/other", path)).isFalse();
+		}
+	}
+
+	private void assertMatchingIsAborted(String pattern, String path) {
+		ExecutorService executor = Executors.newSingleThreadExecutor(runnable -> {
+			Thread thread = new Thread(runnable, "AntPathMatcherTests-backtracking");
+			// A runaway regular expression cannot be interrupted: never let it keep the JVM alive.
+			thread.setDaemon(true);
+			return thread;
+		});
+		try {
+			assertThat(executor.submit(() -> {
+				assertThatIllegalStateException()
+						.isThrownBy(() -> pathMatcher.match(pattern, path))
+						.withMessageContaining("Too many character access attempts");
+				assertThatIllegalStateException()
+						.isThrownBy(() -> pathMatcher.matchStart(pattern, path))
+						.withMessageContaining("Too many character access attempts");
+				assertThatIllegalStateException()
+						.isThrownBy(() -> pathMatcher.extractUriTemplateVariables(pattern, path))
+						.withMessageContaining("Too many character access attempts");
+			})).succeedsWithin(Duration.ofSeconds(20));
+		}
+		finally {
+			executor.shutdownNow();
+		}
+	}
+
+	private static String repeat(char c, int count) {
+		char[] chars = new char[count];
+		Arrays.fill(chars, c);
+		return new String(chars);
 	}
 
 }
