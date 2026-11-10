@@ -20,6 +20,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Locale;
 import java.util.Random;
 
 import org.junit.jupiter.api.Test;
@@ -418,6 +419,31 @@ class MimeTypeTests {
 		MimeType deserialized = SerializationTestUtils.serializeAndDeserialize(original);
 		assertThat(deserialized).isEqualTo(original);
 		assertThat(original).isEqualTo(deserialized);
+	}
+
+	@Test
+	void caseConversionIsLocaleIndependent() {
+		Locale oldLocale = Locale.getDefault();
+		Locale.setDefault(new Locale("tr", "TR"));
+		try {
+			MimeType mimeType = new MimeType("IMAGE", "GIF", singletonMap("ID", "1"));
+			assertThat(mimeType.getType()).isEqualTo("image");
+			assertThat(mimeType.getSubtype()).isEqualTo("gif");
+			assertThat(mimeType.getParameter("id")).isEqualTo("1");
+			assertThat(mimeType.getParameter("ID")).isEqualTo("1");
+			assertThat(mimeType.getParameters().containsKey("id")).isTrue();
+			assertThat(mimeType).isEqualTo(new MimeType("image", "gif", singletonMap("id", "1")));
+
+			MimeType parsed = MimeType.valueOf("TEXT/HTML;charset=UTF-8;LEVEL=1");
+			assertThat(parsed.getType()).isEqualTo("text");
+			assertThat(parsed.getSubtype()).isEqualTo("html");
+			assertThat(parsed.getCharset()).isEqualTo(StandardCharsets.UTF_8);
+			assertThat(parsed.getParameter("level")).isEqualTo("1");
+			assertThat(parsed.isCompatibleWith(MimeTypeUtils.parseMimeType("text/html"))).isTrue();
+		}
+		finally {
+			Locale.setDefault(oldLocale);
+		}
 	}
 
 }
