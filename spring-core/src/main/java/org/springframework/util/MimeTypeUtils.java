@@ -193,7 +193,7 @@ public abstract class MimeTypeUtils {
 
 	/**
 	 * Parse the given String into a single {@code MimeType}.
-	 * Recently parsed {@code MimeType} are cached for further retrieval.
+	 * <p>Recently parsed {@code MimeType} values are cached for future retrieval.
 	 * @param mimeType the string to parse
 	 * @return the mime type
 	 * @throws InvalidMimeTypeException if the string cannot be parsed
@@ -244,7 +244,7 @@ public abstract class MimeTypeUtils {
 						break;
 					}
 				}
-				else if (ch == '"') {
+				else if (ch == '"' && (nextIndex == 0 || mimeType.charAt(nextIndex - 1) != '\\')) {
 					quoted = !quoted;
 				}
 				nextIndex++;
